@@ -193,6 +193,81 @@ issue (no errors are logged; the underlying code loads and runs cleanly) and
 not something the real Hyprland target machine would exhibit. Not worth
 chasing further for a visual-only preview.
 
+## Follow-up round: fixes from an independent 8-angle code review
+
+After the above was committed, a separately-run 8-agent code review (angles:
+line-by-line diff, cross-file tracer, removed-behavior, simplification,
+efficiency, reuse, altitude, CLAUDE.md conventions) surfaced a large list of
+findings. Several were corroborated independently by 2-3 different agents —
+those are the ones fixed below; the rest were single-agent style/reuse
+suggestions, deferred (see "Deliberately not fixed" below).
+
+**Fixed:**
+- **`WallpaperService.qml`: "Apply to All Monitors" only ever actually applied
+  the wallpaper to one output.** `setWallpaper`'s "all" path looped over every
+  connected screen calling `_applyTo()` per screen, reusing the same shared
+  `setProcess` Process object within one synchronous loop — re-setting
+  `running = true` while it's already `true` does not restart a Process, so
+  only the first screen's `awww` invocation ever ran. It also never populated
+  the `"__default__"` state key, so the "All Monitors" tab's active-wallpaper
+  indicator never updated after an apply. Fixed by calling `_applyTo()` once
+  with no target — omitting `--outputs` is awww/swww's own native "every
+  connected output" behavior, which the code already relied on for the
+  zero-screens edge case but never used for the actual common case. This also
+  now clears stale per-monitor pins on an all-monitors apply, since the
+  compositor-level effect really does override every output.
+- **`WallpaperService.qml`: per-monitor scan queue race + O(n²) commit.**
+  Committing a full clone of `perMonitorWallpapers` on every single line a
+  scan process printed was O(n²) for an n-wallpaper directory, and could
+  misattribute results to the wrong monitor if `_parseMonitorDirs()`/
+  `rescan()` reset the queue while a scan was still in flight. Now buffers a
+  scan's output locally, commits once when that scan completes, and
+  explicitly stops any in-flight scan first.
+- **`WallpaperManager.qml`**: grid delegate called `currentFor()` 4x per item;
+  cached in one `isCurrent` property per delegate.
+- **`lib/backup.sh`**: hardcoded `$HOME` instead of `$DOTFILES_TARGET_HOME`
+  when computing a backup's relative path — silently produced a bogus nested
+  path layout under a non-default `DOTFILES_TARGET_HOME` (the documented
+  scratch-directory testing mode).
+- **`audioswitch.sh`**: tightened `check_dependencies` to require `wpctl`
+  (it previously advertised pactl as a full alternative, but the actual
+  switch call was hardcoded to `wpctl` regardless — a pactl-only machine
+  would pass the check and then die on the last line); fixed
+  `AUDIOSWITCH_SINK_IDS` to accept the same comma-or-space syntax as its
+  sibling `AUDIOSWITCH_SINK_NAMES` (was silently parsing `"51,52"` as one
+  bogus token); consolidated 2-3 separate `wpctl status` shell-outs per run
+  into one fetch threaded through every call site.
+
+**Deliberately not fixed, and why:**
+- **No migration for the old `~/.config/quickshell/wallpaper.conf` path** (the
+  per-monitor feature moved state to `wallpaper/wallpaper.conf`). Real gap in
+  principle, but this feature has never been deployed to any real machine —
+  there is no actual installation anywhere with the old path to migrate from.
+  Writing migration code for a deployment that has never happened is exactly
+  the "hypothetical future requirement" to avoid; revisit if/when this ever
+  ships to a real machine that had the old file.
+- **No cleanup of orphaned symlinks when a file is removed from the repo**
+  (e.g. the four deleted `DefaultTheme.qml`/`Whitelist.qml` files would leave
+  dangling symlinks in `$HOME` on a machine that had them linked from before).
+  Real gap in `lib/link.sh`, but a correct fix needs a manifest of what this
+  installer previously linked (so it can tell "safe to remove, I created
+  this" from "user's own file, don't touch") — that's a real feature to design
+  carefully, not a quick patch, and riskier to get wrong (deleting a user's
+  file) than to leave alone for now.
+- **Duplicated key=value parsers** (`_parseMonitorDirs` vs `_parseState` in
+  `WallpaperService.qml`), **duplicated monitor-tab UI blocks**
+  (`WallpaperManager.qml`), and **two divergent "generate config from
+  setup.conf" strategies** (`lib/whitelist.sh` vs `lib/wallpaperconf.sh`) —
+  legitimate reuse observations, but each is only 2 call sites with slightly
+  different edge-case handling already, and no third case exists yet to
+  justify the abstraction. Revisit if a third generated-config file or a
+  third tab-like UI element is ever added.
+- **`pkg::installed`/`pkg::missing` spawn one `pacman -Qi` per package**
+  instead of one batched query — real, but the installer isn't a hot path
+  (runs once per machine setup, not per keypress like `audioswitch.sh`), so
+  the risk of a batching rewrite introducing a subtle diff bug outweighed the
+  benefit here.
+
 ## Recommended next steps for a new session
 
 1. **Nothing is committed yet as of this writing** — see the file inventory
