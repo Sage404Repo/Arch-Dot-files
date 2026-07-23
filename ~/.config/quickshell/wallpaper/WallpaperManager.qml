@@ -268,11 +268,13 @@ Scope {
           model: root.filteredWallpapers
 
           delegate: Item {
+            id: wallpaperTile
             required property string modelData
             required property int index
+            readonly property bool isCurrent: WallpaperService.currentFor(root.selectedMonitor) === modelData
 
             Accessible.role: Accessible.Button
-            Accessible.name: modelData.split("/").pop() + (WallpaperService.currentFor(root.selectedMonitor) === modelData ? ", current wallpaper" : "")
+            Accessible.name: modelData.split("/").pop() + (wallpaperTile.isCurrent ? ", current wallpaper" : "")
 
             width: wallpaperGrid.cellWidth
             height: wallpaperGrid.cellHeight
@@ -282,8 +284,8 @@ Scope {
               anchors.margins: 4
               radius: 8
               color: root.theme.bgSurface
-              border.color: WallpaperService.currentFor(root.selectedMonitor) === modelData ? root.theme.accentPrimary : (imgHover.containsMouse ? root.theme.bgBorder : "transparent")
-              border.width: WallpaperService.currentFor(root.selectedMonitor) === modelData ? 2 : 1
+              border.color: wallpaperTile.isCurrent ? root.theme.accentPrimary : (imgHover.containsMouse ? root.theme.bgBorder : "transparent")
+              border.width: wallpaperTile.isCurrent ? 2 : 1
               clip: true
 
               Image {
@@ -339,7 +341,7 @@ Scope {
                 height: 20
                 radius: 10
                 color: root.theme.accentPrimary
-                visible: WallpaperService.currentFor(root.selectedMonitor) === modelData
+                visible: wallpaperTile.isCurrent
 
                 Text {
                   anchors.centerIn: parent

@@ -76,8 +76,17 @@ Singleton {
     }
     root.perMonitorDirs = dirs;
     root.perMonitorWallpapers = {};
+    root._stopScan();
     root._scanQueue = Object.keys(dirs);
     root._scanNextInQueue();
+  }
+
+  // Stops any in-flight monitor scan before the queue is reset out from
+  // under it — see the onRunningChanged comment below for why `monitor`
+  // is cleared first.
+  function _stopScan() {
+    monitorScanner.monitor = "";
+    monitorScanner.running = false;
   }
 
   function _scanNextInQueue() {
@@ -85,6 +94,7 @@ Singleton {
     const monitor = root._scanQueue[0];
     const dir = root.perMonitorDirs[monitor];
     monitorScanner.monitor = monitor;
+    monitorScanner._buffer = [];
     monitorScanner.command = ["sh", "-c",
       "find \"$1\" -maxdepth 2 -type f \\( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \\) 2>/dev/null | sort -u | head -200",
       "sh", dir];
@@ -92,23 +102,40 @@ Singleton {
   }
 
   // Reused sequentially for every configured monitor directory — simpler
-  // and safer than spinning up one dynamic Process per monitor.
+  // and safer than spinning up one dynamic Process per monitor. Results
+  // are buffered locally and only committed to perMonitorWallpapers once,
+  // when this run finishes (onRunningChanged), rather than on every single
+  // line: committing per-line was an O(n²) clone of the whole map for a
+  // directory with n wallpapers, and re-triggered every binding that reads
+  // perMonitorWallpapers n times over instead of once. Buffering also
+  // closes a real race: if _parseMonitorDirs()/rescan() re-fire while a
+  // scan is still in flight, the property `monitor` could be reassigned
+  // out from under a still-running process, misattributing its remaining
+  // output to the new monitor — both callers now stop this process first
+  // (`monitorScanner.running = false`) before resetting the queue.
   Process {
     id: monitorScanner
     property string monitor: ""
+    property var _buffer: []
     running: false
     stdout: SplitParser {
       onRead: data => {
         const path = data.trim();
-        if (path === "") return;
-        const existing = root.perMonitorWallpapers[monitorScanner.monitor] || [];
-        const updated = Object.assign({}, root.perMonitorWallpapers);
-        updated[monitorScanner.monitor] = [...existing, path];
-        root.perMonitorWallpapers = updated;
+        if (path !== "") monitorScanner._buffer.push(path);
       }
     }
     onRunningChanged: {
-      if (!running && root._scanQueue.length > 0) {
+      if (running) return;
+      // `monitor` is cleared by _stopScan() before a forced stop (queue
+      // being reset out from under this run) — skip committing/advancing
+      // in that case, since the caller that stopped us owns starting the
+      // next scan itself. Only a natural completion (monitor still set)
+      // commits its buffer and advances the queue.
+      if (monitorScanner.monitor === "") return;
+      const updated = Object.assign({}, root.perMonitorWallpapers);
+      updated[monitorScanner.monitor] = monitorScanner._buffer;
+      root.perMonitorWallpapers = updated;
+      if (root._scanQueue.length > 0) {
         root._scanQueue = root._scanQueue.slice(1);
         root._scanNextInQueue();
       }
@@ -149,6 +176,7 @@ Singleton {
     wallpapers = [];
     scanner.running = true;
     root.perMonitorWallpapers = {};
+    root._stopScan();
     root._scanQueue = Object.keys(root.perMonitorDirs);
     root._scanNextInQueue();
   }
@@ -175,22 +203,25 @@ Singleton {
 
   // setWallpaper(path, monitorName) — monitorName === "" applies to every
   // currently connected monitor at once; a specific monitor name applies
-  // to just that output via awww/swww's --outputs flag.
+  // to just that output via awww/swww's --outputs flag. Omitting
+  // --outputs entirely (handled in _applyTo below) is awww/swww's own
+  // native "apply to every connected output" behavior — no need to
+  // enumerate Quickshell.screens and call _applyTo once per screen here
+  // (the previous version did, reusing the single shared setProcess for
+  // each call within the same synchronous loop; since re-setting
+  // `running = true` while already true does not restart a Process, only
+  // the first screen's invocation ever actually ran).
   function setWallpaper(path, monitorName) {
-    if (!monitorName) {
-      const targets = Quickshell.screens.map(s => s.name).filter(n => !!n);
-      if (targets.length === 0) {
-        _applyTo(path, "");
-      } else {
-        for (const name of targets) _applyTo(path, name);
-      }
-      return;
-    }
-    _applyTo(path, monitorName);
+    _applyTo(path, monitorName || "");
   }
 
   function _applyTo(path, monitorName) {
-    const updated = Object.assign({}, root.currentWallpapers);
+    // A single-monitor apply overrides just that monitor's own entry. An
+    // "All Monitors" apply (monitorName === "") actually overwrites every
+    // connected output at the compositor level, so any existing
+    // per-monitor pins are now stale — drop them instead of leaving them
+    // to show the wrong wallpaper as "current" on their tab.
+    const updated = monitorName ? Object.assign({}, root.currentWallpapers) : {};
     updated[monitorName || "__default__"] = path;
     root.currentWallpapers = updated;
 

@@ -20,7 +20,14 @@ backup::file() {
     return 0
   fi
 
-  local rel="${target#"$HOME"/}"
+  # DOTFILES_TARGET_HOME, not $HOME: setup.conf documents it as overridable
+  # for testing against a scratch directory, and link::run builds every
+  # $target it passes here from that variable. Hardcoding $HOME meant a
+  # non-default DOTFILES_TARGET_HOME never actually matched the prefix, so
+  # $rel stayed the full absolute path and backups landed nested under a
+  # bogus "$DOTFILES_BACKUP_DIR/tmp/scratch-home/..." layout instead of
+  # mirroring the real relative structure.
+  local rel="${target#"${DOTFILES_TARGET_HOME:-$HOME}"/}"
   local dest="$DOTFILES_BACKUP_DIR/$rel"
   mkdir -p -- "$(dirname -- "$dest")"
 

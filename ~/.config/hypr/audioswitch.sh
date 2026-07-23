@@ -68,8 +68,15 @@ die() {
 }
 
 check_dependencies() {
-  if ! command -v wpctl &>/dev/null && ! command -v pactl &>/dev/null; then
-    die "Neither wpctl nor pactl found. Install pipewire/pipewire-pulse."
+  # wpctl is required, not optional: it's the only tool this script
+  # actually uses to switch the default sink (below). pactl is used
+  # opportunistically for reading the current default and as a listing
+  # fallback, but was never wired up as a real switch-time alternative —
+  # advertising "either is fine" here previously meant a pactl-only
+  # machine could pass this check, resolve everything correctly, and then
+  # die on the final `wpctl set-default` call anyway.
+  if ! command -v wpctl &>/dev/null; then
+    die "wpctl not found. Install wireplumber (pactl alone can't switch the default sink here)."
   fi
 }
 
@@ -79,10 +86,13 @@ clean_status() {
 }
 
 # Print "<id> <name>" for every sink currently known to wpctl (falls back
-# to pactl if wpctl's Sinks section can't be parsed).
+# to pactl if wpctl's Sinks section can't be parsed). Accepts an
+# already-fetched clean_status() output as $1 to avoid re-invoking wpctl
+# when the caller already has one — main() fetches it once and threads it
+# through every call site instead of shelling out to `wpctl status`
+# 2-3 times per keypress.
 list_sinks() {
-  local clean rows
-  clean=$(clean_status)
+  local clean="${1:-$(clean_status)}" rows
   rows=$(echo "$clean" | awk '
     /^[ ]*Sinks:/ { insink=1; next }
     /^[ ]*Sources:/ { insink=0 }
@@ -104,14 +114,15 @@ list_sinks() {
 
 # Resolve a comma/space-separated list of name patterns to currently-valid
 # sink IDs, in the order the patterns were given, skipping any pattern that
-# doesn't currently match a sink.
+# doesn't currently match a sink. $2 is an already-fetched clean_status()
+# output, threaded through to list_sinks (see its comment).
 resolve_ids_by_name() {
-  local patterns_raw="$1"
+  local patterns_raw="$1" clean="$2"
   local -a patterns
   IFS=', ' read -r -a patterns <<< "$patterns_raw"
 
   local sinks
-  sinks=$(list_sinks)
+  sinks=$(list_sinks "$clean")
 
   local pattern id
   for pattern in "${patterns[@]}"; do
@@ -145,16 +156,29 @@ main() {
 
   check_dependencies
 
+  # Fetched once and threaded through every call below (list_sinks,
+  # resolve_ids_by_name, and the current-sink fallback all otherwise each
+  # re-invoke `wpctl status` independently — up to 3 forks of the same
+  # snapshot per keypress for what is, in the common no-name-configured
+  # path, unconfigured/default behavior).
+  local clean
+  clean=$(clean_status)
+
   local -a sink_list=()
   if [ -n "$AUDIOSWITCH_SINK_NAMES" ]; then
-    mapfile -t sink_list < <(resolve_ids_by_name "$AUDIOSWITCH_SINK_NAMES")
+    mapfile -t sink_list < <(resolve_ids_by_name "$AUDIOSWITCH_SINK_NAMES" "$clean")
   elif [ -n "$AUDIOSWITCH_SINK_IDS" ]; then
     local -a all_sinks target_ids
-    mapfile -t all_sinks < <(list_sinks | awk '{print $1}')
-    read -r -a target_ids <<< "$AUDIOSWITCH_SINK_IDS"
+    mapfile -t all_sinks < <(list_sinks "$clean" | awk '{print $1}')
+    # Comma-or-space separated, matching AUDIOSWITCH_SINK_NAMES's syntax
+    # (resolve_ids_by_name above) — plain `read -a` here previously only
+    # accepted whitespace, so the documented-elsewhere "51,52" style
+    # silently parsed as one bogus token and matched nothing.
+    IFS=', ' read -r -a target_ids <<< "$AUDIOSWITCH_SINK_IDS"
 
     local id found sink_id
     for id in "${target_ids[@]}"; do
+      [ -z "$id" ] && continue
       found=false
       for sink_id in "${all_sinks[@]}"; do
         if [[ "$sink_id" == "$id" ]]; then
@@ -171,7 +195,7 @@ main() {
     # makes the script actually useful out of the box on a fresh machine,
     # instead of failing with "no sinks available" until someone edits a
     # config for hardware it can't know about in advance.
-    mapfile -t sink_list < <(list_sinks | awk '{print $1}')
+    mapfile -t sink_list < <(list_sinks "$clean" | awk '{print $1}')
     if [ ${#sink_list[@]} -gt 0 ]; then
       echo "Note: no sinks configured (see the header of this script); cycling through all ${#sink_list[@]} available sink(s)." >&2
     fi
@@ -185,8 +209,9 @@ main() {
   current=$(pactl get-default-sink 2>/dev/null || true)
   if [ -z "$current" ] || ! [[ "$current" =~ ^[0-9]+$ ]]; then
     # pactl may report a sink name rather than a numeric ID; fall back to
-    # detecting the wpctl-marked default (the line starting with '*').
-    current=$(clean_status | awk '
+    # detecting the wpctl-marked default (the line starting with '*') from
+    # the already-fetched status text above instead of re-invoking wpctl.
+    current=$(echo "$clean" | awk '
       /^[ ]*Sinks:/ { insink=1; next }
       /^[ ]*Sources:/ { insink=0 }
       insink && /^\*/ { gsub(/[^0-9]/, "", $2); if ($2 != "") { print $2; exit } }
@@ -216,7 +241,7 @@ main() {
   wpctl set-default "$next" || die "Failed to set default sink to $next"
 
   local name
-  name=$(list_sinks | grep -E "^$next " | head -1 | cut -d' ' -f2-)
+  name=$(list_sinks "$clean" | grep -E "^$next " | head -1 | cut -d' ' -f2-)
   [ -z "$name" ] && name="Sink $next"
 
   echo "Switched default audio sink: $current -> $next ($name)"
