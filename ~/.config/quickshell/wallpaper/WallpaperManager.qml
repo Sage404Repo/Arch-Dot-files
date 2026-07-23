@@ -1,15 +1,22 @@
+pragma ComponentBehavior: Bound
+
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import QtQuick.Layouts
+import "../common" as Common
 
 Scope {
   id: root
-  property var theme: DefaultTheme {}
+  property var theme: Common.Theme {}
 
   property string searchText: ""
   property string previewPath: ""
+  // "" means the "All Monitors" tab (shared library, applies to every
+  // connected output at once). A specific screen name restricts the grid
+  // to that monitor's own directory (if configured) and targets just it.
+  property string selectedMonitor: ""
 
   IpcHandler {
     target: "wallpaper"
@@ -26,9 +33,10 @@ Scope {
   }
 
   property var filteredWallpapers: {
+    const source = WallpaperService.wallpapersFor(root.selectedMonitor);
     const q = searchText.toLowerCase();
-    if (q === "") return WallpaperService.wallpapers;
-    return WallpaperService.wallpapers.filter(p => {
+    if (q === "") return source;
+    return source.filter(p => {
       const name = p.split("/").pop().toLowerCase();
       return name.includes(q);
     });
@@ -133,6 +141,66 @@ Scope {
           }
         }
 
+        // Monitor selector — "All Monitors" plus one tab per connected
+        // screen. Picking a tab restricts the grid to that monitor's own
+        // wallpaper folder (if configured in DOTFILES_WALLPAPER_DIRS) and
+        // targets just it when you click a thumbnail.
+        Row {
+          Layout.fillWidth: true
+          spacing: 6
+
+          Rectangle {
+            width: allTabLabel.width + 20
+            height: 26
+            radius: 13
+            color: root.selectedMonitor === "" ? root.theme.accentPrimary : root.theme.bgSurface
+
+            Text {
+              id: allTabLabel
+              anchors.centerIn: parent
+              text: "All Monitors"
+              color: root.selectedMonitor === "" ? root.theme.bgBase : root.theme.textPrimary
+              font.pixelSize: 11
+              font.family: "Hack Nerd Font"
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.selectedMonitor = ""
+            }
+          }
+
+          Repeater {
+            model: Quickshell.screens
+
+            Rectangle {
+              id: monitorTab
+              required property var modelData
+
+              width: tabLabel.width + 20
+              height: 26
+              radius: 13
+              color: root.selectedMonitor === monitorTab.modelData.name ? root.theme.accentPrimary : root.theme.bgSurface
+
+              Text {
+                id: tabLabel
+                anchors.centerIn: parent
+                text: monitorTab.modelData.name
+                color: root.selectedMonitor === monitorTab.modelData.name ? root.theme.bgBase : root.theme.textPrimary
+                font.pixelSize: 11
+                font.family: "Hack Nerd Font"
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectedMonitor = monitorTab.modelData.name
+              }
+            }
+          }
+        }
+
         // Search
         Rectangle {
           Layout.fillWidth: true
@@ -204,7 +272,7 @@ Scope {
             required property int index
 
             Accessible.role: Accessible.Button
-            Accessible.name: modelData.split("/").pop() + (WallpaperService.currentWallpaper === modelData ? ", current wallpaper" : "")
+            Accessible.name: modelData.split("/").pop() + (WallpaperService.currentFor(root.selectedMonitor) === modelData ? ", current wallpaper" : "")
 
             width: wallpaperGrid.cellWidth
             height: wallpaperGrid.cellHeight
@@ -214,8 +282,8 @@ Scope {
               anchors.margins: 4
               radius: 8
               color: root.theme.bgSurface
-              border.color: WallpaperService.currentWallpaper === modelData ? root.theme.accentPrimary : (imgHover.containsMouse ? root.theme.bgBorder : "transparent")
-              border.width: WallpaperService.currentWallpaper === modelData ? 2 : 1
+              border.color: WallpaperService.currentFor(root.selectedMonitor) === modelData ? root.theme.accentPrimary : (imgHover.containsMouse ? root.theme.bgBorder : "transparent")
+              border.width: WallpaperService.currentFor(root.selectedMonitor) === modelData ? 2 : 1
               clip: true
 
               Image {
@@ -271,12 +339,14 @@ Scope {
                 height: 20
                 radius: 10
                 color: root.theme.accentPrimary
-                visible: WallpaperService.currentWallpaper === modelData
+                visible: WallpaperService.currentFor(root.selectedMonitor) === modelData
 
                 Text {
                   anchors.centerIn: parent
                   text: ""
-                  color: root.theme.textPrimary
+                  // Dark glyph on the light accentPrimary fill above — using
+                  // textPrimary (also light) here was invisible (light-on-light).
+                  color: root.theme.bgBase
                   font.pixelSize: 12
                   font.family: "Hack Nerd Font"
                 }
@@ -292,7 +362,7 @@ Scope {
                   if (mouse.button === Qt.RightButton) {
                     root.previewPath = modelData;
                   } else {
-                    WallpaperService.setWallpaper(modelData);
+                    WallpaperService.setWallpaper(modelData, root.selectedMonitor);
                   }
                 }
               }
@@ -319,7 +389,7 @@ Scope {
           Row {
             spacing: 4
             Rectangle {
-              width: hintClick.width + 8; height: 18; radius: 4; color: root.theme.bgSecondary
+              width: hintClick.width + 8; height: 18; radius: 4; color: root.theme.bgSurface
               Text { id: hintClick; anchors.centerIn: parent; text: "click"; color: root.theme.textMuted; font.pixelSize: 10; font.family: "Hack Nerd Font" }
             }
             Text { text: "apply"; color: root.theme.textPrimary; font.pixelSize: 10; font.family: "Hack Nerd Font"; anchors.verticalCenter: parent.verticalCenter }
@@ -328,7 +398,7 @@ Scope {
           Row {
             spacing: 4
             Rectangle {
-              width: hintRight.width + 8; height: 18; radius: 4; color: root.theme.bgSecondary
+              width: hintRight.width + 8; height: 18; radius: 4; color: root.theme.bgSurface
               Text { id: hintRight; anchors.centerIn: parent; text: "right-click"; color: root.theme.textMuted; font.pixelSize: 10; font.family: "Hack Nerd Font" }
             }
             Text { text: "preview"; color: root.theme.textPrimary; font.pixelSize: 10; font.family: "Hack Nerd Font"; anchors.verticalCenter: parent.verticalCenter }
@@ -372,7 +442,12 @@ Scope {
         width: applyRow.width + 32
         height: 40
         radius: 20
-        color: root.theme.accentSecondary
+        // accentSecondary/textSecondary/textMuted here (as fill + on-fill
+        // text) don't exist on the shared theme and previously rendered as
+        // invalid/mismatched colors; accentPrimary + bgBase gives a real,
+        // legible light-button/dark-label pair matching the theme actually
+        // shipped in common/Theme.qml.
+        color: root.theme.accentPrimary
         Accessible.role: Accessible.Button
         Accessible.name: "Apply wallpaper"
 
@@ -383,14 +458,14 @@ Scope {
 
           Text {
             text: ""
-            color: root.theme.textSecondary
+            color: root.theme.bgBase
             font.pixelSize: 14
             font.family: "Hack Nerd Font"
             anchors.verticalCenter: parent.verticalCenter
           }
           Text {
             text: "Apply Wallpaper"
-            color: root.theme.textMuted
+            color: root.theme.bgBase
             font.pixelSize: 13
             font.family: "Hack Nerd Font"
             font.bold: true
@@ -402,7 +477,7 @@ Scope {
           anchors.fill: parent
           cursorShape: Qt.PointingHandCursor
           onClicked: {
-            WallpaperService.setWallpaper(root.previewPath);
+            WallpaperService.setWallpaper(root.previewPath, root.selectedMonitor);
             root.previewPath = "";
           }
         }

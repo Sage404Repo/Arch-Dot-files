@@ -1,4 +1,4 @@
-import QtQuick 2.15
+import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import "applauncher" as Launcher
@@ -7,11 +7,11 @@ import "wallpaper" as WP
 import "media" as Media
 //import "filemanager" as FM
 
-ShellRoot{
-Launcher.AppLauncher {}
-WP.WallpaperManager {}
-Notif.NotificationPopup {}
-Media.MediaControl {}
-//FM.FileManager {}
+ShellRoot {
+  Launcher.AppLauncher {}
+  WP.WallpaperManager {}
+  Notif.NotificationPopup {}
+  Media.MediaControl {}
+  //FM.FileManager {}
 }
 
