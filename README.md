@@ -16,7 +16,9 @@ just preview what it would do) on a fresh machine.
     desktop entries (`common/Whitelist.qml`).
   - `notifications/` — themed notification popups (urgency colors, icons,
     dismiss/expire handling).
-  - `wallpaper/` — wallpaper picker/grid with live preview and search.
+  - `wallpaper/` — wallpaper picker/grid with live preview, search, and
+    optional per-monitor directories/tabs (see "Per-monitor wallpapers"
+    below).
   - `media/` — MPRIS-backed media transport widget (play/pause/next/prev).
   - `common/` — the shared `Theme.qml` and `Whitelist.qml` every module
     above imports, so there is exactly one place to edit colors or the
@@ -28,6 +30,9 @@ just preview what it would do) on a fresh machine.
   backs up anything it would overwrite, links this repo's `~/` tree onto
   your real `$HOME`, and can be run as a single `curl | bash` command on a
   fresh install.
+- **`dev/preview/`** — a way to visually sanity-check the Quickshell QML in
+  an ordinary window, without installing Quickshell or Hyprland at all (see
+  "Previewing the UI without Hyprland/Quickshell" below).
 
 ## Requirements
 
@@ -79,6 +84,7 @@ cd Arch-Dot-files-Fork
 | `-n`, `--dry-run` | Preview every step — no packages installed, no files touched, no backups moved. Skips the menu. |
 | `-v`, `--verbose` | Print extra debug detail (also written to the log regardless). |
 | `--no-menu` | Run the plain step-by-step flow even on a real terminal. |
+| `--list-whitelist` | Print the configured app-launcher whitelist and exit — no other action taken. |
 | `-h`, `--help` | Show usage. |
 
 `-y` and `-n` combine (`./setup.sh -y -n`) for a fully unattended preview,
@@ -109,6 +115,7 @@ Key settings:
 | `DOTFILES_ENSURE_DIRS` | Paths kept as real directories instead of symlinks (e.g. `Pictures/Wallpapers`, since that's personal data, not tracked here). |
 | `DOTFILES_REQUIRED_PKGS` / `_OPTIONAL_PKGS` / `_AUR_PKGS` / `_CONFLICT_PKGS` | The dependency manifest used by `lib/deps.sh`. |
 | `DOTFILES_APP_WHITELIST` | The app launcher's allow-list. `setup.sh` regenerates `common/Whitelist.qml` from this array every run (see "App whitelist" below). |
+| `DOTFILES_WALLPAPER_DIRS` | Optional per-monitor wallpaper directories. `setup.sh` regenerates `~/.config/quickshell/wallpaper/monitors.conf` from this array every run (see "Per-monitor wallpapers" below). |
 
 `DOTFILES_REPO_URL` and `DOTFILES_CLONE_DIR` are **environment variables**
 (not `setup.conf` settings) read only during the initial `curl | bash`
@@ -136,6 +143,30 @@ exact ID for an app with:
 ```sh
 find /usr/share/applications ~/.local/share/applications -name '*.desktop'
 ```
+
+## Per-monitor wallpapers
+
+By default the wallpaper picker shows one shared library
+(`~/Pictures/Wallpapers`, `~/Pictures`) applied to every monitor at once. To
+give specific monitors their own directory, add entries to
+`DOTFILES_WALLPAPER_DIRS` in `setup.conf`/`setup.conf.local`:
+
+```sh
+DOTFILES_WALLPAPER_DIRS=(
+  "DP-1:Pictures/Wallpapers/ultrawide"
+  "HDMI-A-1:Pictures/Wallpapers/portrait"
+)
+```
+
+Find your monitor names with `hyprctl monitors`. `setup.sh` regenerates
+`~/.config/quickshell/wallpaper/monitors.conf` from this array every run (a
+real file written into `$HOME`, not tracked in git — it embeds
+machine-specific absolute paths). The picker then shows an "All Monitors"
+tab plus one tab per connected screen: picking a monitor's own tab restricts
+the grid to its configured directory and applies only to that output;
+"All Monitors" applies to every connected output at once and uses the
+shared library. A monitor not listed here just falls back to the shared
+library, same as before this feature existed.
 
 ## How linking works
 
@@ -184,10 +215,58 @@ echo 'AUDIOSWITCH_SINK_NAMES="Razer,Speaker"' > ~/.config/hypr/audioswitch.conf
 
 ```sh
 ~/.config/hypr/audioswitch.sh --list   # see available sinks (ID + name)
+~/.config/hypr/audioswitch.sh --help   # usage
+~/.config/hypr/audioswitch.sh          # actually switch (what the keybind runs)
 ```
 
 If nothing is configured at all, it cycles through every currently available
 sink — a safe, universal default rather than failing on a fresh machine.
+Requires `wpctl` (from `wireplumber`) to actually switch the sink; `pactl`
+is used opportunistically for reading the current default but isn't a
+substitute for `wpctl` — `check_dependencies` will tell you if it's missing.
+
+## Previewing the UI without Hyprland/Quickshell installed
+
+`dev/preview/` renders any of this repo's real, unmodified `.qml` files in
+an ordinary desktop window, using small fake stand-ins for Quickshell's
+building blocks (`dev/preview/qmlshim/`) instead of a real Quickshell
+install — useful for sanity-checking layout/color/spacing changes on a
+machine that doesn't have Hyprland or Quickshell at all (including, notably,
+the machine this repo's own installer development happens on).
+
+**Requirements:** only Qt6's own `qml` binary
+(`pacman -S --needed qt6-declarative`) — nothing from this repo needs to be
+installed or linked into `$HOME` to use it.
+
+```sh
+dev/preview/run.sh launcher        # applauncher/AppLauncher.qml
+dev/preview/run.sh notifications   # notifications/NotificationPopup.qml
+dev/preview/run.sh wallpaper       # wallpaper/WallpaperManager.qml
+dev/preview/run.sh media           # media/MediaControl.qml
+dev/preview/run.sh shell           # shell.qml — all four components at once
+dev/preview/run.sh --help          # usage
+```
+
+IPC-triggered panels (the launcher, wallpaper picker, and notifications) open
+automatically shortly after the window appears, since there's no real
+`qs ipc call` bridge to trigger them by hand outside a real Quickshell
+session. Close the window (or `Ctrl-C` in the terminal) to stop.
+
+**What this does and doesn't verify:** it confirms the QML actually
+*loads and runs* — imports resolve, singletons work, functions exist,
+bindings don't throw — which has caught real bugs before (a missing import
+that would have crashed the whole shell on startup; a singleton
+registration bug that silently broke the app launcher and wallpaper picker).
+It does **not** exercise real wlr-layer-shell rendering/anchoring, real
+D-Bus notifications, real MPRIS players, real desktop entries, or real
+wallpaper application — `qmlshim/` feeds each component small, fake sample
+data instead. Treat a clean run as "this code isn't broken," not as
+"this looks and behaves exactly like it will under Hyprland."
+
+Every `.qml` file's own comments in `qmlshim/` explain exactly what's faked
+and why, and `dev/preview/run.sh --help`'s output (plus the comments at the
+top of that file) cover the rest of its behavior and known limitations in
+more depth than belongs in this README.
 
 ## Updating
 
@@ -222,6 +301,11 @@ lib/
   deps.sh            dependency + conflict policy, built on pkg.sh
   backup.sh          timestamped backup-before-overwrite
   link.sh            file-level symlinking of the repo's `~/` tree
+  whitelist.sh       regenerates common/Whitelist.qml from DOTFILES_APP_WHITELIST
+  wallpaperconf.sh   regenerates wallpaper/monitors.conf from DOTFILES_WALLPAPER_DIRS
+dev/preview/         QML preview harness — see "Previewing the UI" above
+  run.sh             preview launcher (requires only qt6-declarative)
+  qmlshim/           fake Quickshell types the preview loads instead of the real thing
 ~/                   the actual dotfiles, mirroring $HOME's layout
 ```
 
@@ -235,6 +319,14 @@ where they genuinely fit a shell script:
   is fixed; each step's real behavior is implemented in its own module.
 - **Singleton-style module state** (`log.sh`) — one shared logger instance,
   initialized once, used everywhere through its function API only.
+
+## More documentation
+
+- [`CHANGELOG.md`](CHANGELOG.md) — the full history of this fork, written as
+  a teaching document (what changed, why, how, and why not) for anyone
+  learning git or programming alongside this project.
+- [`conclusion.md`](conclusion.md) — working session notes: what's verified,
+  what's still open, for anyone picking the project back up.
 
 ## License
 
