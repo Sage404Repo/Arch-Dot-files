@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import Quickshell
 import Quickshell.Wayland
 import Quickshell.Widgets
@@ -5,10 +7,11 @@ import Quickshell.Io
 import Quickshell.Services.Notifications
 import QtQuick
 import QtQuick.Layouts
+import "../common" as Common
 
 Scope {
   id: root
-  property var theme: DefaultTheme {}
+  property var theme: Common.Theme {}
 
   IpcHandler {
     target: "notifications"
@@ -186,7 +189,7 @@ Scope {
                   Text {
                     anchors.centerIn: parent
                     text: "󰅖"
-                    color: closeHover.containsMouse ? root.theme.accentRed :                                         root.theme.textPrimary
+                    color: closeHover.containsMouse ? root.theme.accentRed : root.theme.textPrimary
                     font.pixelSize: 12
                     font.family: "Hack Nerd Font"
                   }

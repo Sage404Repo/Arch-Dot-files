@@ -1,0 +1,8 @@
+module Quickshell
+singleton Quickshell 1.0 Quickshell.qml
+singleton DesktopEntries 1.0 DesktopEntries.qml
+Scope 1.0 Scope.qml
+ShellRoot 1.0 ShellRoot.qml
+ScriptModel 1.0 ScriptModel.qml
+Variants 1.0 Variants.qml
+Singleton 1.0 Singleton.qml

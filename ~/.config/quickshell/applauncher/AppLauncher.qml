@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -5,19 +7,11 @@ import Quickshell.Widgets
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "../common" as Common
 
 Scope {
   id: root
-  property var theme: DefaultTheme {}
-  
-  property var wL1: {"discord.desktop"}
-  property var wL2: {"com.vysp3r.ProtonPlus.desktop"}
-  property var wL3: {"librewolf.desktop"}
-  property var wL4: {"nm-connection-editor.desktop"}
-  property var wL5: {"scrcpy.dekstop"}
-  property var wL6: {"steam.dekstop"}
-  property var wL7: {"r2modman.desktop"}
-  property var wL8: {"localsend.desktop"}
+  property var theme: Common.Theme {}
 
   IpcHandler {
     target: "launcher"
@@ -39,11 +33,9 @@ Scope {
     objectProp: "id"
     values: {
       const all = [...DesktopEntries.applications.values];
-      
-      const allowed = all.filter(app => root.wL1.concat(
-          root.wL2, root.wL3, root.wL4, root.wL5, root.wL6, root.wL7, root.wL8).includes(app.id));
-      
-      
+
+      const allowed = all.filter(app => Common.Whitelist.allowedAppIds.includes(app.id));
+
       const q = searchInput.text.trim().toLowerCase();
       if (q === "") return allowed.sort((a, b) => a.name.localeCompare(b.name));
       return allowed.filter(d =>

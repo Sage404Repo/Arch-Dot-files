@@ -1,0 +1,25 @@
+# Personal, machine-specific overrides — never commit real values here.
+# See setup.conf's header comment for how this file is used.
+setup.conf.local
+
+# Installer runtime artifacts. These normally live under $HOME
+# (~/.local/state, ~/.local/share), outside the repo — ignored here
+# defensively in case DOTFILES_LOG_DIR / DOTFILES_BACKUP_DIR /
+# DOTFILES_CLONE_DIR are ever pointed at the repo itself.
+/backups/
+/logs/
+*.log
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+# NOT a bare `*~` — this repo's tracked tree is rooted at a literal `~`
+# directory (mirroring $HOME), and gitignore patterns match any path
+# component. `*~` would match that root component itself and silently
+# ignore every untracked file anywhere under it (confirmed: it swallowed
+# new qmldir files added under ~/.config/quickshell/ during this session
+# until caught here). `?*~` still matches real one-or-more-character editor
+# backup filenames (`file.txt~`) but requires at least 2 characters, so the
+# bare single-character `~` directory name can't match.
+?*~
