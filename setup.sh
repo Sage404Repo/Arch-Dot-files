@@ -73,6 +73,10 @@ else
       exit 1
     fi
   else
+    if [[ -z "$clone_dir" || "$clone_dir" != /* || "$clone_dir" == "/" ]]; then
+      echo "error: unsafe DOTFILES_CLONE_DIR: '$clone_dir' (refusing to rm -rf)" >&2
+      exit 1
+    fi
     rm -rf -- "$clone_dir"   # clear out any stale/partial non-git leftovers
     if ! _bootstrap_retry git clone --depth 1 "$repo_url" "$clone_dir"; then
       echo "error: failed to clone $repo_url (network drop?). Cleaning up and exiting — just re-run to retry." >&2
